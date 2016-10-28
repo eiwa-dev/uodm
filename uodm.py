@@ -17,12 +17,6 @@ import weakref
 import abc
 import uuid
 
-# 3rd party imports
-
-# own package imports
-
-# relative imports
-
 __author__ = [  "Juan Carrano <jc@eiwa.ag>",
                 "Diego Vazquez <dv@eiwa.ag>"
              ]
@@ -35,8 +29,10 @@ class DocumentError(Exception):
     pass
 
 class Attr:
+    """Describe a Document attribute."""
     def __init__(self, flags='', *args):
-        """Flags is a combination of:
+        """Flags is a string which can be empty or have any of the
+         following characters:
             'm': mutable (can be modified)
             'r': reference (is a reference to another MappedDocument)
 
@@ -59,6 +55,15 @@ class Attr:
             self.default = args[0]
 
 class Document(abc.ABC):
+    """A Document object maps to a document in a collection.
+    All documents have a _name_ attribute consisting of a UUID.
+
+    Attributes can be references to other Documents. The database
+    document will store the UUID of the referred document. When the
+    attribute is acceces, the UUID is looked up in the ODM context and
+    the corresponding Document object is returned.
+    """
+
     @property
     @abc.abstractmethod
     def DB_COLLECTION(self):
@@ -84,6 +89,17 @@ class Document(abc.ABC):
 
 
     def __init__(self, odm, _name_ = None, **kwargs):
+        """Initialize the Document with the given values. If _name_
+        is not given, it is assigned a new UUID.
+
+        odm must be a ODM object.
+
+        This constructor DOES NOT write the document to the database.
+
+        Note that you probably don't want to use this method directly,
+        but rather call ODM.new or Document.new_like .
+        """
+
         self.contents = {}
         _kwargs = dict(kwargs)
 
@@ -111,6 +127,8 @@ class Document(abc.ABC):
         return uuid.uuid1()
 
     def write(self):
+        """Insert the document in the database. This is a low-level
+        method"""
         _doc = {"_name_": self._name_}
         _doc.update(self.contents)
 
@@ -146,6 +164,9 @@ class Document(abc.ABC):
             super().__setattr__(name, value)
 
     def set_multiple(self, d):
+        """Modify multiple values in one operation.
+        This works because document-level operations in Mongo are atomic.
+        """
         raw_update = {}
 
         for k, v in d:
@@ -166,22 +187,45 @@ class Document(abc.ABC):
                                 {'$set':raw_update})
 
     def find_one(self, _name_):
+        """Find one document of the same type in the same ODM context as
+        this object.
+        """
         return self._odm.find_one(type(self), _name_)
 
     def find_all(self, criteria):
+        """Find all document of the same type which match "criteria"
+        in the same ODM context as this object.
+        """
         return self._odm.find_all(type(self), criteria)
 
     def new_like(self, **kwargs):
+        """Create a new object of the same type of this object in the
+        same ODM context"""
         return self._odm.new(type(self), **kwargs)
 
 class ODM:
+    """ODM context.
+
+    This class encapsulates a database connection. The key is that it
+    provides a cache to ensure that only one object with a given _name_
+    exists at any given time. This is the reason for using UUIDs instead
+    of Mongo's _id field, which is guaranteed to be unique only within
+    one collection.
+    """
     def __init__(self, db_conn):
+        """db_conn must be a mongo database. Example:
+            client = pymongo.MongoClient(connection_uri)[db_name]
+        """
         self.db_conn = db_conn
         self._cache = weakref.WeakValueDictionary()
 
     def find_one(self, cls, _name_):
         """Find a document by name. If more or less than one document is
-        found, raise a DocumentError."""
+        found, raise a DocumentError.
+
+        cls: A class derived from Document
+        _name_: a UUID.
+        """
         try:
             obj = self._cache[_name_]
             return obj
@@ -199,7 +243,12 @@ class ODM:
         return self._new(cls, **d)
 
     def find_all(self, cls, criteria):
-        """Return an iterable yielding all matching documents."""
+        """Return an iterable yielding all matching documents.
+
+        cls: A class derived from Document
+        criteria: search criteria like the one used in mongo's find()
+            method.
+        """
         cursor = self.db_conn[cls.DB_COLLECTION].find(criteria)
 
         for d in cursor:
@@ -213,11 +262,19 @@ class ODM:
             yield self._new(cls, **d)
 
     def _new(self, cls, **kwargs):
+        """Create a new object and register it in the cache.
+        """
         obj = cls(self, **kwargs)
         self._cache[obj._name_] = obj
         return obj
 
     def new(self, cls, **kwargs):
+        """Create a new object, register it in the cache and commit it
+        to the database.
+
+        cls: A class derived from Document
+        kwargs: Object initializers.
+        """
         obj = self._new(cls, **kwargs)
         obj.write()
         return obj
