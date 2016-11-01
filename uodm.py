@@ -54,6 +54,12 @@ class Attr:
         if self.has_default:
             self.default = args[0]
 
+    def raw_value(self, value):
+        """If the attribute is a reference, return v's name"""
+        return value if not self.reference else (
+                    value if isinstance(value, uuid.UUID) else (
+                    value._name_ if value is not None else None))
+
 class Document(abc.ABC):
     """A Document object maps to a document in a collection.
     All documents have a _name_ attribute consisting of a UUID.
@@ -62,6 +68,8 @@ class Document(abc.ABC):
     document will store the UUID of the referred document. When the
     attribute is acceces, the UUID is looked up in the ODM context and
     the corresponding Document object is returned.
+
+    References can be None.
     """
 
     @property
@@ -111,7 +119,7 @@ class Document(abc.ABC):
             else:
                 raise ValueError("Argument ´%s´ not given and no default available"%k)
 
-            raw_value = value if not attr_.reference else value._name_
+            raw_value = attr_.raw_value(value)
 
             self.contents[k] = raw_value
 
@@ -138,7 +146,7 @@ class Document(abc.ABC):
         if name in self.ATTRIBUTES:
             _attr = self.ATTRIBUTES[name]
             raw_value = self.contents[name]
-            if _attr.reference:
+            if _attr.reference and raw_value is not None:
                 return self._odm.find_one(_attr.ref_class, raw_value)
             else:
                 return raw_value
@@ -152,7 +160,7 @@ class Document(abc.ABC):
             if not _attr.mutable:
                 raise AttributeError("Attribute %s is read-only"%name)
 
-            raw_value = value if not _attr.reference else value._name_
+            raw_value = _attr.raw_value(value)
 
             # FIXME: ensure that if the db update fails, this object is
             # not modified.
@@ -163,13 +171,17 @@ class Document(abc.ABC):
         else:
             super().__setattr__(name, value)
 
+    def __repr__(self):
+        return "{}({})".format(self.__class__.__name__,
+                    ",".join("{!r}={!r}".format(*it) for it in self.contents.items()))
+
     def set_multiple(self, d):
         """Modify multiple values in one operation.
         This works because document-level operations in Mongo are atomic.
         """
         raw_update = {}
 
-        for k, v in d:
+        for k, v in d.items():
             try:
                 _attr = self.ATTRIBUTES[k]
             except KeyError:
@@ -178,7 +190,7 @@ class Document(abc.ABC):
             if not _attr.mutable:
                 raise AttributeError("Attribute %s is read-only"%k)
 
-            raw_value = v if not _attr.reference else v._name_
+            raw_value = _attr.raw_value(v)
 
             raw_update[k] = raw_value
 
@@ -232,7 +244,7 @@ class ODM:
         except KeyError:
             pass
 
-        cursor = db_conn[cls.DB_COLLECTION].find({'_name_':_name_})
+        cursor = self.db_conn[cls.DB_COLLECTION].find({'_name_':_name_})
 
         if cursor.count() == 0:
             raise DocumentError("No such document.")

@@ -6,7 +6,7 @@ def readme():
         return f.read()
 
 setup(name='uodm',
-      version='0.1.1',
+      version='0.1.2',
       description='Micro Object-document-mapper',
       long_description=readme(),
       classifiers=[
