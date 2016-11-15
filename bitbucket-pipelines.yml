@@ -17,3 +17,13 @@ pipelines:
             - devpi login $DEVPI_USER --password "$DEVPI_PASS"
             - devpi use $DEVPI_INDEX
             - devpi upload --no-vcs
+            - echo "Push repo"
+            - mkdir -p ~/.ssh
+            - echo $OTHER_REPO_FINGERPRINTS_b64 | base64 -d >> ~/.ssh/known_hosts
+            - echo >> ~/.ssh/known_hosts
+            - chmod 600 ~/.ssh/known_hosts
+            - echo $SSH_GIT_KEY_b64 | base64 -d > ~/.ssh/id_rsa
+            - echo >> ~/.ssh/id_rsa
+            - cat ~/.ssh/id_rsa
+            - chmod 600 ~/.ssh/id_rsa
+            - git push -uf $OTHER_REPO master
